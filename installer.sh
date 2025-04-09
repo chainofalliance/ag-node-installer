@@ -747,8 +747,7 @@ setup_private_key() {
   log_info "You need to obtain a private key from the Alliance Games dashboard."
   log_info "This key is required for your node to connect to the network."
   log_info ""
-  log_info "You can obtain your private key at: https://dashboard.alliancegames.com/nodes"
-  log_info "(This is a placeholder URL - your administrator will provide the correct link)"
+  log_info "You can obtain your private key at: https://dashboard-testnet.alliancegames.xyz/"
   log_info ""
   
   # Define the .ag-node.env file path
