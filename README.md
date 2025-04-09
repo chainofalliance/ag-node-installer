@@ -5,5 +5,5 @@ This script installs all dependencies and starts the node internactively. Curren
 ## Run
 
 ```bash
-curl -s https://raw.githubusercontent.com/chainofalliance/ag-node-installer/main/installer.sh | sudo bash
+sudo bash -c "$(curl -s https://raw.githubusercontent.com/chainofalliance/ag-node-installer/main/installer.sh)"
 ```
