@@ -470,9 +470,18 @@ server {
 }
 EOL
     
-    # Move the configuration file
+    # Move the configuration file and set proper permissions
     if ! sudo mv /tmp/nginx-ag-node "$NGINX_CONF"; then
       handle_error 1 "Failed to create Nginx configuration file at $NGINX_CONF"
+    fi
+    
+    # Set proper permissions for Nginx configuration
+    if ! sudo chown root:root "$NGINX_CONF"; then
+      handle_error 1 "Failed to set ownership of Nginx configuration file."
+    fi
+    
+    if ! sudo chmod 644 "$NGINX_CONF"; then
+      handle_error 1 "Failed to set permissions of Nginx configuration file."
     fi
     
     # For Debian/Ubuntu style, create symbolic link
@@ -537,9 +546,18 @@ EOL
 </VirtualHost>
 EOL
     
-    # Move the configuration file
+    # Move the configuration file and set proper permissions
     if ! sudo mv /tmp/apache-ag-node "$APACHE_CONF"; then
       handle_error 1 "Failed to create Apache configuration file at $APACHE_CONF"
+    fi
+    
+    # Set proper permissions for Apache configuration
+    if ! sudo chown root:root "$APACHE_CONF"; then
+      handle_error 1 "Failed to set ownership of Apache configuration file."
+    fi
+    
+    if ! sudo chmod 644 "$APACHE_CONF"; then
+      handle_error 1 "Failed to set permissions of Apache configuration file."
     fi
     
     # For Debian/Ubuntu style, enable the site
