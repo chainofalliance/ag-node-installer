@@ -384,8 +384,16 @@ configure_web_server() {
   log_info "Configuring $WEB_SERVER for domain: $DOMAIN"
   
   if [ "$WEB_SERVER" = "nginx" ]; then
-    # Create Nginx configuration file
-    NGINX_CONF="/etc/nginx/sites-available/ag-node"
+    # Determine Nginx configuration directory based on distribution
+    if [ -d "/etc/nginx/sites-available" ]; then
+      # Debian/Ubuntu style
+      NGINX_CONF="/etc/nginx/sites-available/ag-node"
+      NGINX_ENABLED="/etc/nginx/sites-enabled/ag-node"
+    else
+      # Red Hat/Fedora style
+      NGINX_CONF="/etc/nginx/conf.d/ag-node.conf"
+      NGINX_ENABLED="$NGINX_CONF"
+    fi
     
     # Create the Nginx configuration
     cat > /tmp/nginx-ag-node << EOL
@@ -413,14 +421,14 @@ server {
 }
 EOL
     
-    # Move the configuration file and set up symbolic link
+    # Move the configuration file
     if ! sudo mv /tmp/nginx-ag-node "$NGINX_CONF"; then
       handle_error 1 "Failed to create Nginx configuration file at $NGINX_CONF"
     fi
     
-    # Enable the site if not already enabled
-    if [ ! -f "/etc/nginx/sites-enabled/ag-node" ]; then
-      if ! sudo ln -s "$NGINX_CONF" "/etc/nginx/sites-enabled/ag-node"; then
+    # For Debian/Ubuntu style, create symbolic link
+    if [ -d "/etc/nginx/sites-available" ] && [ ! -f "$NGINX_ENABLED" ]; then
+      if ! sudo ln -s "$NGINX_CONF" "$NGINX_ENABLED"; then
         handle_error 1 "Failed to enable Nginx site configuration."
       fi
     fi
@@ -439,8 +447,16 @@ EOL
     log_info "Nginx configuration created at $NGINX_CONF and enabled."
     
   elif [ "$WEB_SERVER" = "apache" ]; then
-    # Create Apache configuration file
-    APACHE_CONF="/etc/apache2/sites-available/ag-node.conf"
+    # Determine Apache configuration directory based on distribution
+    if [ -d "/etc/apache2/sites-available" ]; then
+      # Debian/Ubuntu style
+      APACHE_CONF="/etc/apache2/sites-available/ag-node.conf"
+      APACHE_ENABLED="/etc/apache2/sites-enabled/ag-node.conf"
+    else
+      # Red Hat/Fedora style
+      APACHE_CONF="/etc/httpd/conf.d/ag-node.conf"
+      APACHE_ENABLED="$APACHE_CONF"
+    fi
     
     # Create the Apache configuration
     cat > /tmp/apache-ag-node << EOL
@@ -477,21 +493,35 @@ EOL
       handle_error 1 "Failed to create Apache configuration file at $APACHE_CONF"
     fi
     
-    # Enable the site
-    log_info "Enabling Apache site configuration..."
-    if ! sudo a2ensite ag-node; then
-      handle_error 1 "Failed to enable Apache site."
+    # For Debian/Ubuntu style, enable the site
+    if [ -d "/etc/apache2/sites-available" ]; then
+      log_info "Enabling Apache site configuration..."
+      if ! sudo a2ensite ag-node; then
+        handle_error 1 "Failed to enable Apache site."
+      fi
     fi
     
     # Test configuration and reload Apache
     log_info "Testing Apache configuration..."
-    if ! sudo apache2ctl configtest; then
-      handle_error 1 "Apache configuration test failed."
+    if [ -d "/etc/apache2" ]; then
+      if ! sudo apache2ctl configtest; then
+        handle_error 1 "Apache configuration test failed."
+      fi
+    else
+      if ! sudo httpd -t; then
+        handle_error 1 "Apache configuration test failed."
+      fi
     fi
     
     log_info "Reloading Apache to apply new configuration..."
-    if ! sudo systemctl reload apache2; then
-      handle_error 1 "Failed to reload Apache."
+    if [ -d "/etc/apache2" ]; then
+      if ! sudo systemctl reload apache2; then
+        handle_error 1 "Failed to reload Apache."
+      fi
+    else
+      if ! sudo systemctl reload httpd; then
+        handle_error 1 "Failed to reload Apache."
+      fi
     fi
     
     log_info "Apache configuration created at $APACHE_CONF and enabled."
