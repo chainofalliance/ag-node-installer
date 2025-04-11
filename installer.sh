@@ -90,11 +90,47 @@ package_installed() {
 
 # Function to check if a service is installed
 service_installed() {
-  if systemctl list-unit-files | grep -q "$1.service"; then
+  local service_name="$1"
+  
+  # Check for different service names based on distribution
+  case "$service_name" in
+    apache2)
+      if [ -d "/etc/apache2" ]; then
+        service_name="apache2"
+      else
+        service_name="httpd"
+      fi
+      ;;
+    nginx)
+      service_name="nginx"  # Same across distributions
+      ;;
+    docker)
+      service_name="docker"  # Same across distributions
+      ;;
+  esac
+  
+  if systemctl list-unit-files | grep -q "$service_name.service"; then
     return 0  # Service is installed
   else
     return 1  # Service is not installed
   fi
+}
+
+# Function to get service name based on distribution
+get_service_name() {
+  local service="$1"
+  case "$service" in
+    apache2)
+      if [ -d "/etc/apache2" ]; then
+        echo "apache2"
+      else
+        echo "httpd"
+      fi
+      ;;
+    *)
+      echo "$service"
+      ;;
+  esac
 }
 
 # Function to install packages using the detected package manager
@@ -149,7 +185,20 @@ install_dependencies() {
   log_info "Installing required dependencies..."
   
   # Common dependencies across distributions
-  local common_deps=("curl" "wget" "dnsutils" "net-tools")
+  local common_deps=("curl" "wget")
+  
+  # Distribution-specific package names
+  case "$PACKAGE_MANAGER" in
+    apt)
+      common_deps+=("dnsutils" "net-tools")
+      ;;
+    dnf|yum)
+      common_deps+=("bind-utils" "net-tools")
+      ;;
+    pacman)
+      common_deps+=("bind-tools" "net-tools")
+      ;;
+  esac
   
   # Install common dependencies
   install_packages "${common_deps[@]}"
@@ -587,6 +636,24 @@ install_certbot() {
   fi
 }
 
+# Function to check if web server is running
+check_web_server_running() {
+  local service_name=$(get_service_name "$WEB_SERVER")
+  
+  if ! sudo systemctl is-active --quiet "$service_name" 2>/dev/null; then
+    log_warning "$service_name is not running. Starting it now..."
+    if ! sudo systemctl start "$service_name" 2>/dev/null; then
+      handle_error 1 "Failed to start $service_name. Please check the configuration and start it manually."
+    fi
+    sleep 2  # Give service time to start
+  fi
+  
+  # Verify service is now running
+  if ! sudo systemctl is-active --quiet "$service_name" 2>/dev/null; then
+    handle_error 1 "$service_name failed to start. Please check the configuration and start it manually."
+  fi
+}
+
 # Function to obtain SSL certificate using Certbot
 obtain_ssl_certificate() {
   # Extract domain from URL (without https://)
@@ -613,30 +680,7 @@ obtain_ssl_certificate() {
   fi
   
   # Check if web server is running
-  if [ "$WEB_SERVER" = "nginx" ]; then
-    if ! sudo systemctl is-active --quiet nginx 2>/dev/null; then
-      log_warning "Nginx is not running. Starting it now..."
-      if ! sudo systemctl start nginx 2>/dev/null; then
-        handle_error 1 "Failed to start Nginx. Please check the configuration and start it manually."
-      fi
-      sleep 2  # Give Nginx time to start
-    fi
-  elif [ "$WEB_SERVER" = "apache" ]; then
-    if ! sudo systemctl is-active --quiet apache2 2>/dev/null; then
-      log_warning "Apache is not running. Starting it now..."
-      if ! sudo systemctl start apache2 2>/dev/null; then
-        handle_error 1 "Failed to start Apache. Please check the configuration and start it manually."
-      fi
-      sleep 2  # Give Apache time to start
-    fi
-  fi
-  
-  # Verify web server is now running
-  if [ "$WEB_SERVER" = "nginx" ] && ! sudo systemctl is-active --quiet nginx 2>/dev/null; then
-    handle_error 1 "Nginx failed to start. Please check the configuration and start it manually."
-  elif [ "$WEB_SERVER" = "apache" ] && ! sudo systemctl is-active --quiet apache2 2>/dev/null; then
-    handle_error 1 "Apache failed to start. Please check the configuration and start it manually."
-  fi
+  check_web_server_running
   
   # Prompt for email (required for Let's Encrypt)
   echo -e "${YELLOW}[INFO]${NC} Enter your email address for certificate notifications: " >&3
@@ -726,8 +770,14 @@ install_docker() {
       
       # Add Docker repository
       log_info "Adding Docker repository..."
-      if ! sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo; then
-        handle_error 1 "Failed to add Docker repository."
+      if [ "$PACKAGE_MANAGER" = "dnf" ]; then
+        if ! sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo; then
+          handle_error 1 "Failed to add Docker repository."
+        fi
+      else
+        if ! sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo; then
+          handle_error 1 "Failed to add Docker repository."
+        fi
       fi
       
       # Install Docker CE
