@@ -48,20 +48,32 @@ Please run this script with a user that has sudo privileges or run 'sudo -v' fir
   fi
 }
 
-# Function to determine OS type
+# Function to determine OS type and package manager
 determine_os() {
   if [ -f /etc/os-release ]; then
     . /etc/os-release
     OS_NAME="$ID"
+    OS_FAMILY="$ID_LIKE"
     
-    case "$OS_NAME" in
-      ubuntu|debian)
-        log_info "Operating System: $PRETTY_NAME"
-        ;;
-      *)
-        handle_error 1 "Unsupported operating system. Only Ubuntu and Debian are supported."
-        ;;
-    esac
+    # Log the detected OS
+    log_info "Operating System: $PRETTY_NAME"
+    
+    # Determine package manager
+    if command -v apt-get >/dev/null 2>&1; then
+      PACKAGE_MANAGER="apt"
+      log_info "Package Manager: APT"
+    elif command -v dnf >/dev/null 2>&1; then
+      PACKAGE_MANAGER="dnf"
+      log_info "Package Manager: DNF"
+    elif command -v yum >/dev/null 2>&1; then
+      PACKAGE_MANAGER="yum"
+      log_info "Package Manager: YUM"
+    elif command -v pacman >/dev/null 2>&1; then
+      PACKAGE_MANAGER="pacman"
+      log_info "Package Manager: Pacman"
+    else
+      handle_error 1 "Could not determine package manager. Only APT, DNF, YUM, and Pacman are supported."
+    fi
   else
     handle_error 1 "Cannot determine operating system."
   fi
@@ -85,21 +97,62 @@ service_installed() {
   fi
 }
 
-# Function to install required packages
-install_dependencies() {
-  log_info "Installing required dependencies..."
+# Function to install packages using the detected package manager
+install_packages() {
+  local packages=("$@")
+  log_info "Installing packages: ${packages[*]}"
   
-  case "$OS_NAME" in
-    ubuntu|debian)
+  case "$PACKAGE_MANAGER" in
+    apt)
       if ! sudo apt-get update -y; then
         handle_error 1 "Failed to update package lists."
       fi
-      
-      if ! sudo apt-get install -y curl wget dnsutils net-tools; then
-        handle_error 1 "Failed to install required dependencies."
+      if ! sudo apt-get install -y "${packages[@]}"; then
+        handle_error 1 "Failed to install packages: ${packages[*]}"
       fi
       ;;
+    dnf)
+      if ! sudo dnf update -y; then
+        handle_error 1 "Failed to update package lists."
+      fi
+      if ! sudo dnf install -y "${packages[@]}"; then
+        handle_error 1 "Failed to install packages: ${packages[*]}"
+      fi
+      ;;
+    yum)
+      if ! sudo yum update -y; then
+        handle_error 1 "Failed to update package lists."
+      fi
+      if ! sudo yum install -y "${packages[@]}"; then
+        handle_error 1 "Failed to install packages: ${packages[*]}"
+      fi
+      ;;
+    pacman)
+      if ! sudo pacman -Syu --noconfirm; then
+        handle_error 1 "Failed to update package lists."
+      fi
+      if ! sudo pacman -S --noconfirm "${packages[@]}"; then
+        handle_error 1 "Failed to install packages: ${packages[*]}"
+      fi
+      ;;
+    *)
+      handle_error 1 "Unsupported package manager: $PACKAGE_MANAGER"
+      ;;
   esac
+  
+  log_success "Packages installed successfully: ${packages[*]}"
+  return 0
+}
+
+# Function to install required dependencies
+install_dependencies() {
+  log_info "Installing required dependencies..."
+  
+  # Common dependencies across distributions
+  local common_deps=("curl" "wget" "dnsutils" "net-tools")
+  
+  # Install common dependencies
+  install_packages "${common_deps[@]}"
   
   # Verify essential tools are installed
   for cmd in curl wget dig; do
@@ -217,32 +270,24 @@ detect_web_server() {
 install_apache() {
   log_info "Installing Apache web server..."
   
-  case "$OS_NAME" in
-    ubuntu|debian)
-      if ! sudo apt-get update -y; then
-        handle_error 1 "Failed to update package lists."
-      fi
-      
-      if ! sudo apt-get install -y apache2; then
-        handle_error 1 "Failed to install Apache web server."
-      fi
-      
-      # Enable required modules
-      log_info "Enabling required Apache modules..."
-      modules=("ssl" "proxy" "proxy_http" "headers" "proxy_wstunnel" "rewrite")
-      for module in "${modules[@]}"; do
-        if ! sudo a2enmod $module; then
-          handle_error 1 "Failed to enable Apache module: $module"
-        fi
-      done
-      
-      # Restart Apache to apply changes
-      log_info "Restarting Apache to apply module changes..."
-      if ! sudo systemctl restart apache2; then
-        handle_error 1 "Failed to restart Apache after enabling modules."
-      fi
-      ;;
-  esac
+  # Install Apache and required modules
+  local apache_packages=("apache2")
+  install_packages "${apache_packages[@]}"
+  
+  # Enable required modules
+  log_info "Enabling required Apache modules..."
+  modules=("ssl" "proxy" "proxy_http" "headers" "proxy_wstunnel" "rewrite")
+  for module in "${modules[@]}"; do
+    if ! sudo a2enmod $module; then
+      handle_error 1 "Failed to enable Apache module: $module"
+    fi
+  done
+  
+  # Restart Apache to apply changes
+  log_info "Restarting Apache to apply module changes..."
+  if ! sudo systemctl restart apache2; then
+    handle_error 1 "Failed to restart Apache after enabling modules."
+  fi
   
   # Verify installation
   if service_installed "apache2"; then
@@ -258,27 +303,19 @@ install_apache() {
 install_nginx() {
   log_info "Installing Nginx web server..."
   
-  case "$OS_NAME" in
-    ubuntu|debian)
-      if ! sudo apt-get update -y; then
-        handle_error 1 "Failed to update package lists."
-      fi
-      
-      if ! sudo apt-get install -y nginx; then
-        handle_error 1 "Failed to install Nginx web server."
-      fi
-      
-      # Ensure Nginx is started and enabled
-      log_info "Starting and enabling Nginx service..."
-      if ! sudo systemctl start nginx; then
-        handle_error 1 "Failed to start Nginx service."
-      fi
-      
-      if ! sudo systemctl enable nginx; then
-        handle_error 1 "Failed to enable Nginx service."
-      fi
-      ;;
-  esac
+  # Install Nginx
+  local nginx_packages=("nginx")
+  install_packages "${nginx_packages[@]}"
+  
+  # Ensure Nginx is started and enabled
+  log_info "Starting and enabling Nginx service..."
+  if ! sudo systemctl start nginx; then
+    handle_error 1 "Failed to start Nginx service."
+  fi
+  
+  if ! sudo systemctl enable nginx; then
+    handle_error 1 "Failed to enable Nginx service."
+  fi
   
   # Verify installation
   if service_installed "nginx"; then
@@ -476,43 +513,40 @@ install_certbot() {
 
   log_info "Installing Certbot for SSL certificates..."
   
-  case "$OS_NAME" in
-    ubuntu|debian)
-      if ! sudo apt-get update -y; then
-        handle_error 1 "Failed to update package lists."
-      fi
-      
-      # Install Certbot and web server plugins
+  # Install Certbot and web server plugins based on package manager
+  case "$PACKAGE_MANAGER" in
+    apt|dnf|yum)
+      local certbot_packages=("certbot")
       if [ "$WEB_SERVER" = "apache" ]; then
-        if ! sudo apt-get install -y certbot python3-certbot-apache; then
-          handle_error 1 "Failed to install Certbot with Apache plugin."
-        fi
-        log_info "Certbot with Apache plugin installed."
+        certbot_packages+=("python3-certbot-apache")
       elif [ "$WEB_SERVER" = "nginx" ]; then
-        if ! sudo apt-get install -y certbot python3-certbot-nginx; then
-          handle_error 1 "Failed to install Certbot with Nginx plugin."
-        fi
-        log_info "Certbot with Nginx plugin installed."
-      else
-        if ! sudo apt-get install -y certbot; then
-          handle_error 1 "Failed to install Certbot."
-        fi
-        log_info "Certbot installed (without web server plugin)."
+        certbot_packages+=("python3-certbot-nginx")
       fi
-      
-      # Set up auto-renewal
-      log_info "Setting up automatic certificate renewal..."
-      if ! sudo systemctl enable certbot.timer; then
-        handle_error 1 "Failed to enable automatic certificate renewal."
+      ;;
+    pacman)
+      local certbot_packages=("certbot")
+      if [ "$WEB_SERVER" = "apache" ]; then
+        certbot_packages+=("certbot-apache")
+      elif [ "$WEB_SERVER" = "nginx" ]; then
+        certbot_packages+=("certbot-nginx")
       fi
-      
-      if ! sudo systemctl start certbot.timer; then
-        handle_error 1 "Failed to start automatic certificate renewal timer."
-      fi
-      
-      log_info "Automatic renewal configured."
       ;;
   esac
+  
+  # Install Certbot and plugins
+  install_packages "${certbot_packages[@]}"
+  
+  # Set up auto-renewal
+  log_info "Setting up automatic certificate renewal..."
+  if ! sudo systemctl enable certbot.timer; then
+    handle_error 1 "Failed to enable automatic certificate renewal."
+  fi
+  
+  if ! sudo systemctl start certbot.timer; then
+    handle_error 1 "Failed to start automatic certificate renewal timer."
+  fi
+  
+  log_info "Automatic renewal configured."
   
   # Verify installation
   if package_installed "certbot"; then
@@ -631,18 +665,12 @@ install_docker() {
 
   log_info "Installing Docker..."
   
-  case "$OS_NAME" in
-    ubuntu)
-      # Update package index
-      if ! sudo apt-get update -y; then
-        handle_error 1 "Failed to update package lists."
-      fi
-      
+  # Install Docker based on package manager
+  case "$PACKAGE_MANAGER" in
+    apt)
       # Install prerequisites
-      log_info "Installing Docker prerequisites..."
-      if ! sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common; then
-        handle_error 1 "Failed to install Docker prerequisites."
-      fi
+      local prereq_packages=("apt-transport-https" "ca-certificates" "curl" "software-properties-common")
+      install_packages "${prereq_packages[@]}"
       
       # Add Docker's official GPG key
       log_info "Adding Docker's GPG key..."
@@ -656,56 +684,35 @@ install_docker() {
         handle_error 1 "Failed to add Docker repository."
       fi
       
-      # Update package index again
-      if ! sudo apt-get update -y; then
-        handle_error 1 "Failed to update package lists after adding Docker repository."
-      fi
-      
       # Install Docker CE
-      log_info "Installing Docker CE..."
-      if ! sudo apt-get install -y docker-ce docker-ce-cli containerd.io; then
-        handle_error 1 "Failed to install Docker CE."
-      fi
+      local docker_packages=("docker-ce" "docker-ce-cli" "containerd.io")
+      install_packages "${docker_packages[@]}"
       ;;
       
-    debian)
-      # Update package index
-      if ! sudo apt-get update -y; then
-        handle_error 1 "Failed to update package lists."
-      fi
-      
+    dnf|yum)
       # Install prerequisites
-      log_info "Installing Docker prerequisites..."
-      if ! sudo apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release; then
-        handle_error 1 "Failed to install Docker prerequisites."
-      fi
-      
-      # Add Docker's official GPG key
-      log_info "Adding Docker's GPG key..."
-      if ! curl -fsSL https://download.docker.com/linux/debian/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg; then
-        handle_error 1 "Failed to add Docker's GPG key."
-      fi
+      local prereq_packages=("yum-utils" "device-mapper-persistent-data" "lvm2")
+      install_packages "${prereq_packages[@]}"
       
       # Add Docker repository
       log_info "Adding Docker repository..."
-      if ! echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list; then
+      if ! sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo; then
         handle_error 1 "Failed to add Docker repository."
       fi
       
-      # Update package index again
-      if ! sudo apt-get update -y; then
-        handle_error 1 "Failed to update package lists after adding Docker repository."
-      fi
-      
       # Install Docker CE
-      log_info "Installing Docker CE..."
-      if ! sudo apt-get install -y docker-ce docker-ce-cli containerd.io; then
-        handle_error 1 "Failed to install Docker CE."
-      fi
+      local docker_packages=("docker-ce" "docker-ce-cli" "containerd.io")
+      install_packages "${docker_packages[@]}"
+      ;;
+      
+    pacman)
+      # Install Docker
+      local docker_packages=("docker")
+      install_packages "${docker_packages[@]}"
       ;;
       
     *)
-      handle_error 1 "Unsupported OS for Docker installation: $OS_NAME"
+      handle_error 1 "Unsupported package manager for Docker installation: $PACKAGE_MANAGER"
       ;;
   esac
   
